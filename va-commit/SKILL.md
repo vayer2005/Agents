@@ -1,5 +1,5 @@
 ---
-name: commit
+name: va-commit
 description: >-
   Review git changes, write PR review and commit message files, and create a
   formatted commit. Use when the user asks to commit, write a commit message,
@@ -7,7 +7,7 @@ description: >-
 disable-model-invocation: true
 ---
 
-# Commit
+# va-commit
 
 Review changes, write review and commit message files, then commit.
 
