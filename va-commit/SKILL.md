@@ -1,39 +1,42 @@
 ---
 name: va-commit
 description: >-
-  Review git changes, write PR review and commit message files, and create a
-  formatted commit. Use when the user asks to commit, write a commit message,
-  prepare a PR review, or summarize changes before committing.
+  Review git diff, stage changes, write a draft commit message to COMMIT_MSG.md,
+  and open that file in the IDE for the user to edit before committing. Use when
+  the user asks to commit, write a commit message, or summarize changes before
+  committing.
 disable-model-invocation: true
 ---
 
 # va-commit
 
-Review changes, write review and commit message files, then commit.
+Diff, stage, write a draft commit message to `COMMIT_MSG.md`, open it in the IDE, **block until the user saves and closes the tab**, then commit using that file.
 
-## Review and output files
+Do NOT write `PR_REVIEW.md` or any other review file.
+Do NOT use `git commit -e`, vim, or terminal editors.
+Do NOT run `git commit -m` (that bypasses the file the user edits).
 
-Run `git --no-pager diff` and create a code review that uses imperative verbs (add instead of added), (delete instead of deleted). for the changes in the request. make the commit message be in a file such that I can make edits on it in the IDE. have a testing done section with a comment that the user should manually fill out the tests done (if part of the review is adding tests then list out all the tests a user added and breif descriptions of what they do).
+## One-time setup (user)
 
-Write `PR_REVIEW.md` in the project root:
+Run once so `git commit` from the terminal uses the same IDE flow:
 
-```markdown
-# Code Review
-
-[Review using imperative verbs throughout.]
-
-## Testing Done
-
-<!-- User: manually fill out the tests you ran -->
-
-[If new or modified tests are part of the changes, list each test with a brief description.]
-
-- `test_name_or_path` — what the test checks
+```bash
+chmod +x ~/.cursor/skills/va-commit/scripts/git-msg-editor.sh
+git config --global core.editor ~/.cursor/skills/va-commit/scripts/git-msg-editor.sh
 ```
 
-Write `COMMIT_MSG.md` in the project root using the commit message format below so the user can edit it in the IDE before committing.
+Add `COMMIT_MSG.md` to a global gitignore so it is never committed:
+
+```bash
+echo COMMIT_MSG.md >> ~/.gitignore_global
+git config --global core.excludesfile ~/.gitignore_global
+```
+
+Optional: install the `cursor` shell command (Cursor → Command Palette → “Shell Command: Install 'cursor' command in PATH”) so the script works outside the app bundle path.
 
 ## Commit message format
+
+Draft the message in `COMMIT_MSG.md` at the **repository root** using this format:
 
 Format
 <type>(<scope>): <summary>
@@ -55,10 +58,49 @@ If arguments combine files and instructions, honor both.
 ## Steps
 
 Infer from the prompt if the user provided specific file paths/globs and/or additional instructions.
-Review git status and git diff to understand the current changes (limit to argument-specified files if provided).
-(Optional) Run git log -n 50 --pretty=format:%s to see commonly used scopes.
-If there are ambiguous extra files, ask the user for clarification before committing.
-Stage only the intended files (all changes if no files specified).
-Run git commit -m "<subject>" (and -m "<body>" if needed).
 
-Use the subject and body from `COMMIT_MSG.md` when committing.
+### Prepare (always do this first)
+
+1. Review `git status` and `git --no-pager diff` (limit to argument-specified files if provided).
+2. (Optional) Run `git log -n 50 --pretty=format:%s` to match existing scopes.
+3. If there are ambiguous extra files, ask the user for clarification before staging.
+
+### Stage
+
+4. `git add` only the files that belong in this commit (respect path/glob arguments from the user).
+
+### Draft message file
+
+5. Write or overwrite `COMMIT_MSG.md` at the repo root with the drafted message (conventional format above). Do not leave placeholder scope/summary unless the user must fill them in.
+
+### Wait for user (required — do not skip)
+
+6. From the **repository root**, run the wait script and **do not continue until it exits** (user saved and closed the tab):
+
+```bash
+~/.cursor/skills/va-commit/scripts/git-msg-editor.sh --wait-only
+```
+
+Use a long shell timeout (e.g. 30+ minutes). The script runs `cursor --wait` on `COMMIT_MSG.md`; exiting means the user closed the editor tab.
+
+7. After the script exits, read `COMMIT_MSG.md`. If there is no non-empty, non-`#` subject line, stop and tell the user the commit was aborted.
+
+### Commit
+
+8. Commit using the edited file (not `-m`):
+
+```bash
+git commit -F COMMIT_MSG.md
+```
+
+9. Run `git status` to confirm the commit succeeded.
+
+## CLI `git commit` (without the agent)
+
+When `core.editor` points at `git-msg-editor.sh`, a normal `git commit` (no `-m`) will:
+
+1. Let Git create `.git/COMMIT_EDITMSG`
+2. Open `COMMIT_MSG.md` in Cursor via `cursor --wait`
+3. On tab close, copy `COMMIT_MSG.md` back and finish the commit
+
+Same file and same save-and-close behavior as this skill.
