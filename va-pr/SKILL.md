@@ -1,7 +1,7 @@
 ---
 name: va-pr
 description: >-
-  Read only the latest commit on the current branch, write a detailed draft PR
+  Read only the latest commit on the current branch, write a descriptive draft PR
   title and body, and open or update a GitHub draft pull request. Use when the
   user asks to create a PR, draft PR, or generate a PR description.
 disable-model-invocation: true
@@ -45,7 +45,8 @@ Inspect existing PR, push only if needed, then create or **amend** — no follow
 ```bash
 BR=$(git branch --show-current) && \
 HAS_PR=$(gh pr view --json url 2>/dev/null) && \
-if ! git rev-parse --abbrev-ref '@{u}' >/dev/null 2>&1 || [ -n "$(git rev-list '@{u}..HEAD' 2>/dev/null)" ]; then git push -u origin HEAD; fi && \
+UPSTREAM=$(git rev-parse --abbrev-ref '@{u}' 2>/dev/null || true) && \
+if [ -z "$UPSTREAM" ] || [ -n "$(git rev-list '@{u}..HEAD' 2>/dev/null)" ]; then git push -u origin HEAD; fi && \
 if [ -n "$HAS_PR" ]; then \
   gh pr edit --body "$(cat <<'EOF'
 <merged body — see Amend existing PR>
@@ -78,19 +79,26 @@ Do not retitle an open PR to match only the latest commit unless the user asks.
 
 ## New PR body
 
-Write from the **latest commit patch and message** only:
+Write from the **latest commit patch and message** only. Keep **Summary** as bullets only — no paragraphs or subsections.
 
 ```markdown
 ## Summary
 
 - <imperative bullet: concrete change from this commit>
-- <more bullets as needed; behavior, files, rationale>
+- <more bullets as needed>
 
 ## Test plan
 
 - [ ] <verification step a reviewer can run>
 - [ ] <another step, or note what was not tested and why>
 ```
+
+**Summary bullets** — a bit more specific than the commit subject, still one line each:
+
+- Name key files, classes, or functions when they clarify the change.
+- Mention behavior reviewers care about: validation rules, limits, persistence, error cases — only when the patch shows them.
+- For large data files, one bullet on purpose/format; do not restate the commit message or write prose.
+- Avoid vague one-liners ("add tests", "update logic") without saying what is covered or how it behaves.
 
 ## Amend existing PR
 
@@ -103,7 +111,7 @@ Write from the **latest commit patch and message** only:
 5. If the existing body has no `## Summary` / `## Test plan`, keep the full original body and add those sections at the end with the new commit’s bullets/items (do not delete the original text).
 6. Optional: after amending, you may add a one-line note under Summary with the latest commit subject (e.g. `Latest: refactor(robot): …`) — only if it helps; do not remove older bullets.
 
-Summary bullets: imperative mood, substantive enough to stand alone. Test plan: realistic checklist; do not invent tests the diff does not imply.
+Apply the same Summary bullet bar when appending on amend. Test plan: realistic checklist with concrete commands; do not invent tests the diff does not imply.
 
 ## Working directory
 
