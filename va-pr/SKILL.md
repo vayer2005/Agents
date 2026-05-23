@@ -26,10 +26,12 @@ Branch, **existing PR** (if any), latest commit message, patch, and optional wor
 ```bash
 BR=$(git branch --show-current) && echo "branch:$BR" && \
 echo '---existing-pr---' && gh pr view --json title,body,url,state,isDraft 2>/dev/null || true && \
-git --no-pager log -1 --format='%s%n%n%b' && echo '---patch---' && git --no-pager show HEAD && echo '---status---' && git status -sb
+git --no-pager log -1 --format='%s%n%n%b' && echo '---patch---' && git --no-pager show HEAD --stat && echo '---' && git --no-pager show HEAD && echo '---status---' && git status -sb
 ```
 
 If `BR` is empty (detached HEAD), stop. If `HEAD` has no changes, stop and tell the user to commit first.
+
+**Reading large patches:** use `--stat` for file list and scope. For huge data files (dictionaries, lockfiles, generated assets), read the diff header and a few lines only — do not ingest the full file contents. Describe data files by role, format, and approximate size instead.
 
 Use this output for the PR write-up:
 
@@ -45,7 +47,8 @@ Inspect existing PR, push only if needed, then create or **amend** — no follow
 ```bash
 BR=$(git branch --show-current) && \
 HAS_PR=$(gh pr view --json url 2>/dev/null) && \
-if ! git rev-parse --abbrev-ref '@{u}' >/dev/null 2>&1 || [ -n "$(git rev-list '@{u}..HEAD' 2>/dev/null)" ]; then git push -u origin HEAD; fi && \
+UPSTREAM=$(git rev-parse --abbrev-ref '@{u}' 2>/dev/null || true) && \
+if [ -z "$UPSTREAM" ] || [ -n "$(git rev-list '@{u}..HEAD' 2>/dev/null)" ]; then git push -u origin HEAD; fi && \
 if [ -n "$HAS_PR" ]; then \
   gh pr edit --body "$(cat <<'EOF'
 <merged body — see Amend existing PR>
@@ -76,34 +79,68 @@ If the existing PR is not a draft and the user wanted a draft, add `--draft` to 
 
 Do not retitle an open PR to match only the latest commit unless the user asks.
 
+## Writing depth
+
+PR bodies should help a reviewer understand **what** changed, **how** it works, and **why** it matters — not just a commit subject restated as bullets.
+
+Before writing, walk the patch and note:
+
+1. **Purpose** — what problem or feature does this commit address?
+2. **Surface area** — which files/modules; new vs modified vs deleted.
+3. **Behavior** — public API, CLI, user-visible flows, state transitions, persistence, error handling.
+4. **Implementation choices** — non-obvious algorithms, data structures, defaults, constants, edge cases handled.
+5. **Dependencies & data** — new assets, config, fixtures; what was intentionally excluded (e.g. runtime files, `__pycache__`).
+6. **Risk / scope** — breaking changes, migrations, follow-ups; call out if none.
+
+Use complete sentences in **Overview** and **Changes**; bullets there should carry real detail (file names, function/class names, validation rules, limits). Avoid vague bullets like "add tests" or "update logic" without saying what is tested or how logic behaves.
+
+For **Test plan**, tie each checkbox to a concrete command or scenario implied by the diff — include happy path, at least one failure/validation path when the code handles errors, and persistence or side effects when relevant.
+
 ## New PR body
 
-Write from the **latest commit patch and message** only:
+Write from the **latest commit patch and message** only. Use this structure (omit a section only when the diff truly has nothing to say for it):
 
 ```markdown
-## Summary
+## Overview
 
-- <imperative bullet: concrete change from this commit>
-- <more bullets as needed; behavior, files, rationale>
+<2–4 sentences: what this commit delivers, who it is for, and the main outcome. State motivation when inferable from the diff.>
+
+## Changes
+
+### <Component, file, or area name>
+- <Concrete change: class/function added or modified, with behavior — inputs, outputs, limits, defaults>
+- <Another substantive detail from the patch>
+
+### <Next component or file>
+- ...
+
+## Notes
+
+- <Non-obvious design choice, excluded files, follow-up work, or "none" if nothing to call out>
 
 ## Test plan
 
-- [ ] <verification step a reviewer can run>
-- [ ] <another step, or note what was not tested and why>
+- [ ] <Exact command or manual step; expected result>
+- [ ] <Edge case or error path to verify>
+- [ ] <Integration or persistence check when applicable>
 ```
+
+**Minimum bar:** at least one **Changes** subsection per meaningful source file (group tiny related files if needed). Data-only files get one bullet describing format and purpose, not a line-by-line dump.
 
 ## Amend existing PR
 
 **Never** replace the full PR body with content derived from only the latest commit.
 
 1. Start from the existing `body` in the `---existing-pr---` JSON.
-2. Parse `## Summary` and `## Test plan` if present; preserve all other sections and prose verbatim.
-3. **Summary:** keep every existing bullet; **append** new bullet(s) for the latest commit only. Skip a new bullet if it is substantively the same as an existing one.
-4. **Test plan:** keep every existing `- [ ]` item; **append** new items for the latest commit only. Skip duplicates.
-5. If the existing body has no `## Summary` / `## Test plan`, keep the full original body and add those sections at the end with the new commit’s bullets/items (do not delete the original text).
-6. Optional: after amending, you may add a one-line note under Summary with the latest commit subject (e.g. `Latest: refactor(robot): …`) — only if it helps; do not remove older bullets.
+2. Parse `## Overview`, `## Changes`, `## Notes`, and `## Test plan` if present; preserve all other sections and prose verbatim.
+3. **Overview:** lightly revise only if the latest commit shifts the PR's overall purpose; otherwise leave intact.
+4. **Changes:** keep every existing subsection and bullet; **append** new subsections or bullets for the latest commit. Group under the same subsection when the commit extends an existing area. Skip bullets that are substantively duplicate.
+5. **Notes:** append new callouts for the latest commit; keep existing notes.
+6. **Test plan:** keep every existing `- [ ]` item; **append** new items for the latest commit only. Skip duplicates.
+7. If the existing body uses the old short format (`## Summary` only), **upgrade** it: move existing summary bullets under **Changes** (split into subsections as needed), add **Overview** and **Notes** if missing, rename **Summary** → **Changes** only when you can preserve all original bullets.
+8. Optional: after amending, add a one-line note under **Changes** with the latest commit subject (e.g. `Latest: refactor(robot): …`) — only if it helps; do not remove older content.
 
-Summary bullets: imperative mood, substantive enough to stand alone. Test plan: realistic checklist; do not invent tests the diff does not imply.
+Apply the same [Writing depth](#writing-depth) standards when appending; new bullets should be as detailed as the template above, not one-line stubs.
 
 ## Working directory
 
@@ -111,5 +148,5 @@ If the user says to run from a specific repo or to avoid the Cursor workspace ro
 
 ## Caller arguments
 
-- Freeform text shapes Summary/Test plan emphasis (e.g. "call out breaking API change").
+- Freeform text shapes Overview/Changes/Notes/Test plan emphasis (e.g. "call out breaking API change").
 - Optional `--base <branch>` only if the user **explicitly** names a merge target; never infer `main`/`master` for content or for `--base`.
